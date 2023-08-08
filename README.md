@@ -1,0 +1,3 @@
+Basically translated Ryuji (originally written in Typescript) to Rust, to allow usage in Rust, and also hopefully for increased speed. We'll see...
+
+Translating wasn't very easy though, since Rust is a lot stricter. It was pretty fun though.

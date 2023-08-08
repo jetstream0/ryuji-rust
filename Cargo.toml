@@ -1,0 +1,10 @@
+[package]
+name = "ryuji-rust"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+hashmap_json = ["dep:serde_json"]
+
+[dependencies]
+serde_json = { version = "1.0.104", optional = true }
