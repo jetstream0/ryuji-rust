@@ -5,6 +5,31 @@ use std::fs;
 #[cfg(feature = "hashmap_json")]
 use serde::Serialize;
 
+#[derive(Debug)]
+pub enum ErrorKind {
+  InvalidFileExtension,
+  IllegalVarName(String),
+  VarNotFound(String),
+  BadArgument(String),
+  MissingEndFor,
+  MissingEndIf,
+  RecursionTooDeep,
+}
+
+impl fmt::Display for ErrorKind {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match self {
+      ErrorKind::InvalidFileExtension => write!(f, "Invalid file extension (must start with '.')"),
+      ErrorKind::IllegalVarName(var_name) => write!(f, "Illegal variable name: '{}'", var_name),
+      ErrorKind::VarNotFound(var_name) => write!(f, "Variable '{}' not found", var_name),
+      ErrorKind::BadArgument(missing_message) => write!(f, "{}", missing_message),
+      ErrorKind::MissingEndFor => write!(f, "`for:` statement missing `[[ endfor ]]`"),
+      ErrorKind::MissingEndIf => write!(f, "`if:` statement missing `[[ endif ]]`"),
+      ErrorKind::RecursionTooDeep => write!(f, "`component:` statement recursion too deep (>5)"),
+    }
+  }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct FileExtension {
   file_extension: String,
@@ -12,13 +37,13 @@ pub struct FileExtension {
 
 //todo: add errors
 impl FileExtension {
-  pub fn new(file_extension: String) -> Result<Self, ()> {
+  pub fn new(file_extension: String) -> Result<Self, ErrorKind> {
     if file_extension.starts_with(".") {
       Ok(FileExtension {
         file_extension,
       })
     } else {
-      Err(())
+      Err(ErrorKind::InvalidFileExtension)
     }
   }
 
@@ -28,9 +53,9 @@ impl FileExtension {
 }
 
 impl TryFrom<String> for FileExtension {
-  type Error = ();
+  type Error = ErrorKind;
 
-  fn try_from(a: String) -> Result<Self, ()> {
+  fn try_from(a: String) -> Result<Self, ErrorKind> {
     FileExtension::new(a)
   }
 }
@@ -141,15 +166,15 @@ impl Renderer {
     text.replace("<", "&lt;").replace(">", "&gt;")
   }
 
-  pub fn check_var_name_legality(var_name: &String, dot_allowed: bool) -> Result<(), ()> {
-    let mut legal_chars: Vec<char> = vec!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '_', '.'];
+  pub fn check_var_name_legality(var_name: &String, dot_allowed: bool) -> Result<(), ErrorKind> {
+    let mut legal_chars: Vec<char> = vec!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '_', '/', '.'];
     if !dot_allowed {
       legal_chars.pop();
     }
     //if any of them are not in the legal chars
     let fail: bool = var_name.chars().any(|c| !legal_chars.contains(&c.to_ascii_lowercase()));
     if fail {
-      Err(())
+      Err(ErrorKind::IllegalVarName(var_name.clone()))
     } else {
       Ok(())
     }
@@ -182,7 +207,7 @@ impl Renderer {
     matches
   }
 
-  pub fn get_var(var_name: String, vars: &Vars) -> Result<&VarValue, ()> {
+  pub fn get_var(var_name: String, vars: &Vars) -> Result<&VarValue, ErrorKind> {
     Self::check_var_name_legality(&var_name, true)?;
     let mut parts: VecDeque<&str> = var_name.split(".").into_iter().collect();
     let part_uno: &str = parts.pop_front().unwrap();
@@ -192,13 +217,13 @@ impl Renderer {
         var_value = var_value_hashmap.get(part).unwrap();
       } else {
         //bad
-        return Err(());
+        return Err(ErrorKind::VarNotFound(var_name));
       }
     }
     Ok(var_value)
   }
 
-  pub fn render(&self, template_contents: String, vars: &mut Vars, recursion_layer: Option<usize>) -> Result<String, ()> {
+  pub fn render(&self, template_contents: String, vars: &mut Vars, recursion_layer: Option<usize>) -> Result<String, ErrorKind> {
     let recursion_layer: usize = recursion_layer.unwrap_or(0);
     let syntax_matches: Vec<SyntaxMatch> = Self::find_syntax_matches(&template_contents);
     if syntax_matches.len() == 0 {
@@ -218,20 +243,21 @@ impl Renderer {
       let syntax_match: &SyntaxMatch = &syntax_matches[index];
       let exp_parts: Vec<&str> = syntax_match.content[3..syntax_match.content.len()-3].split(":").collect();
       if exp_parts.len() < 1 {
-        return Err(());
+        return Err(ErrorKind::BadArgument("An empty '[[ ]]' is not valid".to_string()));
       }
       if exp_parts[0] == "component" {
         //we do not want get into an infinite recursion loop with components referring to each other
         if recursion_layer > 5 {
-          //`component:` statement recursion too deep (>5)
-          return Err(());
+          return Err(ErrorKind::RecursionTooDeep);
         }
         if exp_parts.len() != 2 {
-          //`component:` statement missing component name (second arg), or more than two args
-          return Err(());
+          return Err(ErrorKind::BadArgument("`component:` statement missing component name (second arg), or more than two args".to_string()));
         }
-        let file_name: String = exp_parts[1].to_string();
-        rendered += &self.render_template(Self::concat_path(&self.components_dir, &format!("{}{}", file_name, self.file_extension.get_string_ref())), vars, Some(recursion_layer+1))?;
+        let mut file_name: String = exp_parts[1].to_string();
+        if !file_name.contains(".") {
+          file_name += self.file_extension.get_string_ref();
+        }
+        rendered += &self.render_template(Self::concat_path(&self.components_dir, &file_name), vars, Some(recursion_layer+1))?;
       } else if exp_parts[0] == "for" {
         let mut already_exists: bool = false;
         let most_recent: Option<&ForLoopInfo> = for_loops.last();
@@ -244,8 +270,7 @@ impl Renderer {
         if !already_exists {
           //variables in for loops are not scoped because that would be too much work
           if exp_parts.len() < 2 {
-            //`for:` statement missing variable name to loop over (second arg)
-            return Err(());
+            return Err(ErrorKind::BadArgument("`for:` statement missing variable name to loop over (second arg)".to_string()));
           }
           let var_name: String = exp_parts[1].to_string();
           let var_value: &VarValue = Self::get_var(var_name, &vars)?;
@@ -310,14 +335,13 @@ impl Renderer {
               }
               if new_index.is_none() {
                 //`for:` statement missing `[[ endfor ]]`
-                return Err(());
+                return Err(ErrorKind::MissingEndFor);
               }
               index += new_index.unwrap()+1;
               continue;
             }
           } else {
-            //variable being looped over in `for:` statement is not a vector
-            return Err(());
+            return Err(ErrorKind::BadArgument("variable being looped over in `for:` statement is not a vector".to_string()));
           }
         }
       } else if exp_parts[0] == "endfor" {
@@ -342,8 +366,7 @@ impl Renderer {
         }
       } else if exp_parts[0] == "if" {
         if exp_parts.len() < 2 {
-          //`if:` statement missing variable name (second arg)
-          return Err(());
+          return Err(ErrorKind::BadArgument("`if:` statement missing variable name (second arg)".to_string()));
         }
         let var_name: String = exp_parts[1].to_string();
         let var_value: &VarValue = Self::get_var(var_name, &vars)?;
@@ -380,8 +403,7 @@ impl Renderer {
             }
           }
         } else {
-          //`if:` statement cannot have more than 3 args
-          return Err(());
+          return Err(ErrorKind::BadArgument("`if:` statement cannot have more than 3 args".to_string()));
         }
         if !condition_pass { //failed condition
           //skip to the endif
@@ -402,7 +424,7 @@ impl Renderer {
           }
           if new_index.is_none() {
             //`if:` statement missing `[[ endif ]]`
-            return Err(());
+            return Err(ErrorKind::MissingEndIf);
           }
           index += new_index.unwrap()+1;
           continue;
@@ -414,8 +436,7 @@ impl Renderer {
         let var_name: String;
         if exp_parts[0] == "html" {
           if exp_parts.len() != 2 {
-            //`html:` statement missing variable name, the second arg, or has more than two args
-            return Err(());
+            return Err(ErrorKind::BadArgument("`html:` statement missing variable name, the second arg, or has more than two args".to_string()));
           }
           var_name = exp_parts[1].to_string();
         } else {
@@ -465,8 +486,11 @@ impl Renderer {
     Ok(rendered)
   }
 
-  pub fn render_template(&self, template_name: String, vars: &mut Vars, recursion_layer: Option<usize>) -> Result<String, ()> {
-    let template_file_name = format!("{}{}", template_name, self.file_extension.get_string_ref());
+  pub fn render_template(&self, template_name: String, vars: &mut Vars, recursion_layer: Option<usize>) -> Result<String, ErrorKind> {
+    let mut template_file_name = template_name;
+    if !template_file_name.contains(".") {
+      template_file_name += self.file_extension.get_string_ref();
+    }
     let content: String = fs::read_to_string(Self::concat_path(&self.templates_dir, &template_file_name)).unwrap();
     self.render(content, vars, recursion_layer)
   }

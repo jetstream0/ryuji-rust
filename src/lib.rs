@@ -32,6 +32,7 @@ mod tests {
   #[test]
   fn var_name_legality_test() {
     assert!(ryuji::Renderer::check_var_name_legality(&"asdf".to_string(), true).is_ok());
+    assert!(ryuji::Renderer::check_var_name_legality(&"random/abc".to_string(), true).is_ok());
     assert!(ryuji::Renderer::check_var_name_legality(&"cheese.burger.property40".to_string(), true).is_ok());
     assert!(ryuji::Renderer::check_var_name_legality(&"Dave_Davidson.drunkness.intensity".to_string(), true).is_ok());
     assert!(ryuji::Renderer::check_var_name_legality(&"Dave_Davidson.drunkness.intensity".to_string(), false).is_err());
