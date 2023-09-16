@@ -1,7 +1,12 @@
 [package]
 name = "ryuji-rust"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
+license = "GPL-3.0"
+repository = "https://github.com/jetstream0/ryuji-rust"
+description = "Ryuji-Rust is an implementation of the Ryuji templating language in Rust."
+homepage = "https://www.prussiafan.club/posts/ryuji-docs"
+keywords = ["templating"]
 
 [features]
 hashmap_json = ["dep:serde_json"]

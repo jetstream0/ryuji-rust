@@ -1,6 +1,8 @@
 //! Ryuji-Rust is an implementation of the Ryuji templating language in Rust.
 pub mod ryuji;
 
+pub use ryuji::{ Renderer, Vars, VarValue, FileExtension };
+
 #[cfg(test)]
 mod tests {
   use super::*;

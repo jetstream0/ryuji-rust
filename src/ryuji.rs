@@ -1,6 +1,7 @@
 use std::collections::{ HashMap, VecDeque };
 use std::fmt;
 use std::fs;
+use std::convert::TryFrom;
 
 #[cfg(feature = "hashmap_json")]
 use serde::Serialize;
@@ -211,10 +212,20 @@ impl Renderer {
     Self::check_var_name_legality(&var_name, true)?;
     let mut parts: VecDeque<&str> = var_name.split(".").into_iter().collect();
     let part_uno: &str = parts.pop_front().unwrap();
-    let mut var_value: &VarValue = &vars.get(part_uno).unwrap();
+    let var_value_unwrapped: &Option<&VarValue> = &vars.get(part_uno);
+    if var_value_unwrapped.is_none() {
+      //bad
+      return Err(ErrorKind::VarNotFound(var_name));
+    }
+    let mut var_value = var_value_unwrapped.unwrap();
     for part in parts {
       if let VarValue::HashMap(var_value_hashmap) = &var_value {
-        var_value = var_value_hashmap.get(part).unwrap();
+        let var_value_hashmap_unwrapped: Option<&VarValue> = var_value_hashmap.get(part);
+        if var_value_hashmap_unwrapped.is_none() {
+          //bad
+          return Err(ErrorKind::VarNotFound(var_name));
+        }
+        var_value = var_value_hashmap_unwrapped.unwrap();
       } else {
         //bad
         return Err(ErrorKind::VarNotFound(var_name));
